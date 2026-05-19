@@ -38,9 +38,9 @@ This is NOT a backtesting framework, or a technical indicator / trading signal l
 
 `/eda`: conduct exploratory data analysis, without training any models.
 
-`/fetch-bars`: a simple skill that basically serves as a natural language interface to fetch bars from different data sources
+`/fetch-bars`: a simple skill that serves as a natural language interface to fetch bars from different data sources and summarize basic insights
 
-`/prep-ml-data`: a simple skill that transforms bar data into features and labels
+`/prep-ml-data`: a simple skill that serves as a natural language interface to transform bar data into features and labels and summarize basic insights
 
 
 ### Development Guide
