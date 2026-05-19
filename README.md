@@ -18,11 +18,12 @@ This is NOT a backtesting framework, or a technical indicator / trading signal l
 ## The How
 
 ### Repo Structure
-* models: ML model implementations
-* scripts: any reusable scripts for training, evaluation, and data visualization
-* utils: any sharable code components across entire repo
-* reports: the folder that contains your research. Each research will have its own folder
-* recaps: research recaps/reflections will be kept in this folder
+* `models`: ML model implementations. It will have a sub-folder called `agent`, which contains the model files added by agent
+* `scripts`: any reusable scripts for training, evaluation, and data visualization
+* `utils`: any sharable code components across entire repo
+* `reports`: the folder that contains your research
+* `recaps`: research recaps/reflections will be kept in this folder. Recaps are very useful to reason about past research results and determine next steps
+* `data`: a folder to cache fetched data to improve training/evaluation velocity
 
 
 ### Skills
@@ -36,6 +37,10 @@ This is NOT a backtesting framework, or a technical indicator / trading signal l
 `/reuse`: look across agent-generated scripts / utils in reports and extract reusable scripts for future research. This improves reproducibility and saves token usage in the future.
 
 `/eda`: conduct exploratory data analysis, without training any models.
+
+`/fetch-bars`: a simple skill that basically serves as a natural language interface to fetch bars from different data sources
+
+`/prep-ml-data`: a simple skill that transforms bar data into features and labels
 
 
 ### Development Guide
