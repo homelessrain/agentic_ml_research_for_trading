@@ -35,6 +35,8 @@ This is NOT a backtesting framework, or a technical indicator / trading signal l
 
 `/reuse`: look across agent-generated scripts / utils in reports and extract reusable scripts for future research. This improves reproducibility and saves token usage in the future.
 
+`/eda`: conduct exploratory data analysis, without training any models.
+
 
 ### Development Guide
 
