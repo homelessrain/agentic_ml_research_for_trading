@@ -42,6 +42,8 @@ This is NOT a backtesting framework, or a technical indicator / trading signal l
 
 `/prep-ml-data`: a simple skill that serves as a natural language interface to transform bar data into features and labels and summarize basic insights
 
+`/try-this-idea`: a skill that tries an idea in a given link (could be a published paper or article) by implementing that idea within this framework
+
 
 ### Development Guide
 

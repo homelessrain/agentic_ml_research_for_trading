@@ -5,3 +5,5 @@ data/*
 pyrightconfig.json
 TODOs.md
 .env
+reports/*
+recaps/*

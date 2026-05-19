@@ -54,10 +54,33 @@ df = transformer.transform(df)
 
 ## Available feature transformers
 
-[TODO]
+Prefer this over writing feature logic from scratch. Lives in `utils/feature_transformer.py`.
 
+**`OLHCVFeatureTransformer`** — derives a rich feature set from OHLCV columns. Requires a `datetime` column (not index), so reset the index first if the bar data uses a DatetimeIndex.
 
-If neither fits, write label logic inline.
+Features produced:
+- **Lag features** — raw OHLCV values at lags 0–9 (10 bars back)
+- **Bar-over-bar change** — diff ratio and log-ratio for each OHLCV column
+- **Moving-average ratios** — price/volume relative to MA windows {5, 10, 20, 50, 100, 200}, both ratio and log-ratio
+- **Technical indicators** — RSI, MACD, MACD signal, MACD histogram (on `close`)
+- **Time features** — `hour_of_day` and `day_of_week` as categorical columns
+
+```python
+from utils.feature_transformer import OLHCVFeatureTransformer
+
+# Reset index so 'timestamp' becomes a column, then rename to 'datetime'
+df = df.reset_index().rename(columns={'timestamp': 'datetime'})
+
+transformer = OLHCVFeatureTransformer()
+df = transformer.transform(df)
+```
+
+`transform()` appends feature columns to the DataFrame in-place and returns it. It does not return the feature column list — track feature columns explicitly:
+```python
+feature_cols = [c for c in df.columns if c not in ['datetime', 'open', 'high', 'low', 'close', 'volume', 'label']]
+```
+
+If neither fits, write feature logic inline.
 
 ## Steps
 

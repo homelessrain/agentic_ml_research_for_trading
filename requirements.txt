@@ -1,1 +1,4 @@
 lumibot
+xgboost>=2.0.0
+pandas-ta
+scikit-learn
