@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
-import pandas_ta  # # importing pandas_ta is necessary for the ta method to work, even if it is not explicitly called
+import pandas_ta  # importing pandas_ta is necessary for the ta method to work, even if it is not explicitly called
 
 
 class FeatureTransformer(ABC):
@@ -12,7 +12,22 @@ class FeatureTransformer(ABC):
     Any feature transformers should NEVER use future data to derive features.
     """
     def __init__(self):
-        pass
+        self._feature_columns: list[str] = []
+
+    @property
+    def feature_columns(self) -> list[str]:
+        """Column names added by the most recent transform() call."""
+        return self._feature_columns
+
+    def _validate_columns(self, df: pd.DataFrame, required: list[str]) -> None:
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            raise ValueError(f"Missing required columns: {', '.join(missing)}")
+
+    def _register(self, name: str) -> str:
+        """Track a feature column name and return it."""
+        self._feature_columns.append(name)
+        return name
 
     @abstractmethod
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -24,7 +39,7 @@ class FeatureTransformer(ABC):
 
 class OLHCVFeatureTransformer(FeatureTransformer):
     """
-    This class derives features from OHLCV columns.
+    Derives features from OHLCV columns.
     """
     def __init__(self):
         super().__init__()
@@ -34,57 +49,50 @@ class OLHCVFeatureTransformer(FeatureTransformer):
         Transform bar data into ML-ready features.
 
         Bar data input can have arbitrary time granularity, e.g. 1 minute, 1 hour, 1 day, etc.
+
+        Return a dataframe with both raw columns and ML-ready features and labels. Downstream code should use the label_column and feature_columns properties to access the columns.
         """
-
         required_columns = ['datetime', 'open', 'high', 'low', 'close', 'volume']
-        assert all(col in df.columns for col in required_columns), f"Some of the required columns ({', '.join(required_columns)}) are missing."
+        self._validate_columns(df, required_columns)
+        self._feature_columns = []
 
-        feature_columns = []
+        value_columns = [c for c in required_columns if c != 'datetime']
 
         # ========================================================
         # Raw bar features
         # ========================================================
         num_recent_bars = 10
         for i in range(num_recent_bars):
-            for col in set(required_columns) - set(['datetime']):
-                feature_col_name = f'{col}_lag_{i}'
-                feature_columns.append(feature_col_name)
-                df[feature_col_name] = df[col].shift(i)
+            for col in value_columns:
+                df[self._register(f'{col}_lag_{i}')] = df[col].shift(i)
 
         # ========================================================
         # Normalized bar features
         # ========================================================
-        # bar-over-bar change percentage features
-        for col in set(required_columns) - set(['datetime']):
-            diff_col_name = f'{col}_diff'
-            df[diff_col_name] = df[col].diff()
-            df[diff_col_name + '_ratio'] = 1 + (df[diff_col_name] / df[f'{col}_lag_1'])
-            df[diff_col_name + '_ratio_log'] = np.log(df[diff_col_name + '_ratio'])
-            feature_columns.append(diff_col_name + '_ratio')
-            feature_columns.append(diff_col_name + '_ratio_log')
+        for col in value_columns:
+            diff_col = f'{col}_diff'
+            df[diff_col] = df[col].diff()
+            df[self._register(f'{diff_col}_ratio')]     = 1 + (df[diff_col] / df[f'{col}_lag_1'])
+            df[self._register(f'{diff_col}_ratio_log')] = np.log(df[f'{diff_col}_ratio'])
 
-        # Moving-average based normalized features
         moving_average_windows = [5, 10, 20, 50, 100, 200]
-        for col in set(required_columns) - set(['datetime']):
+        for col in value_columns:
             for maw in moving_average_windows:
-                ma_col_name = f'{col}_ma_{maw}'
-                df[ma_col_name] = df[col].rolling(window=maw).mean()
-                df[f'{col}_by_' + ma_col_name + '_ratio'] = 1 + (df[col] / df[ma_col_name])
-                df[f'{col}_by_' + ma_col_name + '_ratio_log'] = np.log(df[f'{col}_by_{ma_col_name}_ratio'])
-                feature_columns.append(f'{col}_by_{ma_col_name}_ratio')
-                feature_columns.append(f'{col}_by_{ma_col_name}_ratio_log')
+                ma_col = f'{col}_ma_{maw}'
+                df[ma_col] = df[col].rolling(window=maw).mean()
+                df[self._register(f'{col}_by_{ma_col}_ratio')]     = 1 + (df[col] / df[ma_col])
+                df[self._register(f'{col}_by_{ma_col}_ratio_log')] = np.log(df[f'{col}_by_{ma_col}_ratio'])
 
         # ========================================================
         # Technical indicator features
         # ========================================================
-        df['close_rsi'] = df.ta.rsi(close='close')
-        feature_columns.append('close_rsi')
+        for length in [14, 20, 30, 50, 100, 200]:
+            df[self._register(f'close_rsi_{length}')] = df.ta.rsi(close='close', length=length)
 
-        macd = df.ta.macd(close='close')
-        df['close_macd']        = macd.iloc[:, 0]  # MACD line
-        df['close_macd_hist']   = macd.iloc[:, 1]  # histogram
-        df['close_macd_signal'] = macd.iloc[:, 2]  # signal line
-        feature_columns.extend(['close_macd', 'close_macd_hist', 'close_macd_signal'])
+        macd = df.ta.macd(close='close', length=12, slow=26, signal=9)
+        df[self._register('close_macd')]        = macd.iloc[:, 0]
+        df[self._register('close_macd_hist')]   = macd.iloc[:, 1]
+        df[self._register('close_macd_signal')] = macd.iloc[:, 2]
 
         # ========================================================
         # Time-based features

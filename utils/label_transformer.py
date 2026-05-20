@@ -10,7 +10,11 @@ class LabelTransformer(ABC):
     This class is responsible for transforming bar data into ML-ready labels.
     """
     def __init__(self):
-        pass
+        self._label_column = 'label'
+
+    @property
+    def label_column(self) -> str:
+        return self._label_column
 
     @abstractmethod
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -47,6 +51,8 @@ class DirectionLabelTransformer(LabelTransformer):
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Transform bar data into ML-ready labels, in place.
+
+        Return a dataframe with both raw columns and ML-ready labels. Downstream code should use the label_column and feature_columns properties to access the columns.
         """
 
         df[f'max_up_{self._lookforward_period}_price'] = df[self._price_column].rolling(self._lookforward_period).max().shift(-self._lookforward_period)
@@ -90,6 +96,8 @@ class VolatilityLabelTransformer(LabelTransformer):
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Transform bar data into ML-ready labels, in place.
+
+        Return a dataframe with both raw columns and ML-ready labels. Downstream code should use the label_column and feature_columns properties to access the columns.
         """
 
         df[f'max_up_{self._lookforward_period}_price'] = df[self._price_column].rolling(self._lookforward_period).max().shift(-self._lookforward_period)

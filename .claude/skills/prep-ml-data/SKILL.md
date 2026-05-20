@@ -13,125 +13,148 @@ Parse these from the user's request:
 
 | Parameter | Description |
 |---|---|
-| `symbol` | Ticker string or list (passed through to `fetch-bars` if bar data isn't already loaded) |
-| `start` / `end` | Date range `YYYY-MM-DD` (passed through to `fetch-bars` if needed) |
-| `timeframe` | Bar timeframe: `minute` / `hour` / `day` (default: `day`) |
-| `source` | Bar data source: `alpaca` or `yahoo` (default: `alpaca`) |
+| `symbol` | Ticker string or list |
+| `start` / `end` | Date range `YYYY-MM-DD` |
 | `features` | Natural language description of features to compute (e.g. "returns, volume ratio, rolling volatility") |
-| `label` | Natural language description of the label (e.g. "direction up with 1% threshold over next 5 bars") |
+| `label` | Natural language description of the label (e.g. "direction up with 1% threshold over next 120 bars") |
 
 If the user doesn't specify features or label, ask before proceeding.
 
+## Preferred approach: ML data processor classes
+
+Prefer these over assembling the pipeline manually. They handle bar fetching, flattening, feature/label transforming, and joining minute + daily features in one call. Live in `utils/ml_data_processor.py`.
+
+**`MinuteAndDailyMLDataProcessor`** — single symbol. Fetches minute bars (for labels + short-term features) and daily bars (for longer-horizon features joined on the previous trading day).
+
+```python
+from utils.ml_data_processor import MinuteAndDailyMLDataProcessor
+
+proc = MinuteAndDailyMLDataProcessor(
+    symbol='QQQ',
+    bar_fetcher=None,                  # defaults to AlpacaBarFetcher
+    label_transformer=None,            # defaults to DirectionLabelTransformer()
+    minute_feature_transformer=None,   # defaults to OLHCVFeatureTransformer()
+    daily_feature_transformer=None,    # defaults to OLHCVFeatureTransformer()
+    generate_labels=True,              # set False for inference
+)
+df = proc.run('2026-01-01', '2026-05-01')
+
+# Access column names via properties
+label_col   = proc.label_column     # e.g. 'label'
+feature_cols = proc.feature_columns  # list of all minute + daily feature col names
+```
+
+Output columns use `_minute` / `_daily` suffixes to distinguish granularity. The `datetime` column is always present and is the join key.
+
+**`MultipleSymbolMinuteAndDailyMLDataProcessor`** — multiple symbols, joined on `datetime`.
+
+```python
+from utils.ml_data_processor import MinuteAndDailyMLDataProcessor, MultipleSymbolMinuteAndDailyMLDataProcessor
+
+multi = MultipleSymbolMinuteAndDailyMLDataProcessor(
+    symbols=['QQQ', 'SQQQ'],
+    list_of_ml_data_processors=[
+        MinuteAndDailyMLDataProcessor('QQQ'),
+        MinuteAndDailyMLDataProcessor('SQQQ'),
+    ],
+)
+df = multi.run('2026-01-01', '2026-05-01')
+
+label_col    = multi.label_column
+feature_cols = multi.feature_columns
+```
+
 ## Available label transformers
 
-Prefer these over writing label logic from scratch. Both live in `utils/label_transformer.py`.
+Use these directly when building a custom processor or working outside the processor classes. Both live in `utils/label_transformer.py`.
 
-**`DirectionLabelTransformer`** — binary label: did price move up (or down) by at least `up_delta` within `lookforward_period` bars without first hitting `down_delta` in the opposite direction?
+**`DirectionLabelTransformer`** — binary label: within the next `lookforward_period` bars, did the max gain reach `up_delta` AND the max loss stay below `down_delta`? This is a simultaneous max/min check, not path-dependent.
 ```python
 from utils.label_transformer import DirectionLabelTransformer
 transformer = DirectionLabelTransformer(
     price_column='close',
     label_column='label',
-    positive_label='up',      # 'up' or 'down'
-    up_delta=0.01,            # 1% move threshold
-    down_delta=0.01,
-    lookforward_period=5,     # bars ahead to look
+    positive_label='up',       # 'up' or 'down'
+    up_delta=0.01,             # 1% max-gain threshold
+    down_delta=0.01,           # 1% max-loss exclusion threshold
+    lookforward_period=120,    # bars ahead to look
 )
 df = transformer.transform(df)
 ```
+Recommended baseline: `up_delta=down_delta=0.01`, `lookforward_period=120` → ~9% positive rate on QQQ 1-min bars. Avoid `lookforward_period=30` at 1% (positive rate ~1.4%, too sparse).
 
-**`VolatilityLabelTransformer`** — binary label: did price move at least `change_delta` in either direction within `lookforward_period` bars?
+**`VolatilityLabelTransformer`** — binary label: within the next `lookforward_period` bars, did the max gain OR max loss reach `change_delta`? Fires ~2× more often than direction at the same parameters.
 ```python
 from utils.label_transformer import VolatilityLabelTransformer
 transformer = VolatilityLabelTransformer(
     price_column='close',
     label_column='label',
     change_delta=0.01,
-    lookforward_period=5,
+    lookforward_period=120,
 )
 df = transformer.transform(df)
 ```
+At ≥1% threshold, volatility ≈ direction-up OR direction-down with negligible whipsaw contamination. Use volatility when you care about any large move; use direction when you need a directional signal.
 
 ## Available feature transformers
 
-Prefer this over writing feature logic from scratch. Lives in `utils/feature_transformer.py`.
+Use these directly when building a custom processor. Lives in `utils/feature_transformer.py`.
 
-**`OLHCVFeatureTransformer`** — derives a rich feature set from OHLCV columns. Requires a `datetime` column (not index), so reset the index first if the bar data uses a DatetimeIndex.
+**`OLHCVFeatureTransformer`** — derives a rich feature set from OHLCV columns. Requires a `datetime` column (not index); the processor classes handle this automatically via `_flatten()`.
 
 Features produced:
-- **Lag features** — raw OHLCV values at lags 0–9 (10 bars back)
+- **Lag features** — raw OHLCV values at lags 0–9
 - **Bar-over-bar change** — diff ratio and log-ratio for each OHLCV column
 - **Moving-average ratios** — price/volume relative to MA windows {5, 10, 20, 50, 100, 200}, both ratio and log-ratio
-- **Technical indicators** — RSI, MACD, MACD signal, MACD histogram (on `close`)
-- **Time features** — `hour_of_day` and `day_of_week` as categorical columns
+- **Technical indicators** — RSI (lengths 14/20/30/50/100/200), MACD line/histogram/signal
+- **Time features** — `hour_of_day` and `day_of_week`
 
 ```python
 from utils.feature_transformer import OLHCVFeatureTransformer
 
-# Reset index so 'timestamp' becomes a column, then rename to 'datetime'
+# Flatten MultiIndex bar df first
 df = df.reset_index().rename(columns={'timestamp': 'datetime'})
 
 transformer = OLHCVFeatureTransformer()
 df = transformer.transform(df)
+feature_cols = transformer.feature_columns  # list of added feature column names
 ```
 
-`transform()` appends feature columns to the DataFrame in-place and returns it. It does not return the feature column list — track feature columns explicitly:
-```python
-feature_cols = [c for c in df.columns if c not in ['datetime', 'open', 'high', 'low', 'close', 'volume', 'label']]
-```
+## Steps (when using the processor classes)
 
-If neither fits, write feature logic inline.
+1. **Instantiate and run** the appropriate processor class above.
 
-## Steps
-
-1. **Load bar data** — check if the relevant parquet already exists in `data/bars/`, otherwise delegate to `/fetch-bars`:
+2. **Drop rows with NaNs** introduced by rolling windows or the lookforward shift:
    ```python
-   import sys; sys.path.insert(0, '.')
-   from utils.bar_fetcher import AlpacaBarFetcher, YahooBarFetcher
-
-   fetcher = AlpacaBarFetcher() if source == 'alpaca' else YahooBarFetcher()
-   df = fetcher.fetch_bars(symbol, start, end, timeframe=timeframe)
-   # Work on a single symbol — drop the symbol level if needed
-   df = df.droplevel('symbol') if isinstance(df.index, pd.MultiIndex) else df
+   df = df.dropna(subset=proc.feature_columns + [proc.label_column])
    ```
 
-2. **Apply label transformer** using the closest matching transformer above, or write inline.
-
-3. **Apply feature transformer** using the closest matching transformer above, or write inline.
-
-4. **Drop rows with NaNs** introduced by rolling windows or the lookforward shift:
-   ```python
-   df = df.dropna(subset=feature_cols + ['label'])
-   ```
-
-5. **Save three files to `data/ml/`**:
+3. **Save three files to `data/ml/`**:
    ```python
    import os
-   base = f'data/ml/{symbol}_{start}_{end}_{timeframe}'
+   base = f'data/ml/{symbol}_{start}_{end}_minute'
    os.makedirs('data/ml', exist_ok=True)
 
    features_path = f'{base}_features.parquet'
    labels_path   = f'{base}_{label_description}_labels.parquet'
    joined_path   = f'{base}_{label_description}_joined.parquet'
 
-   df[feature_cols].to_parquet(features_path)
-   df[['label']].to_parquet(labels_path)
-   df[feature_cols + ['label']].to_parquet(joined_path)
+   df[proc.feature_columns].to_parquet(features_path)
+   df[[proc.label_column]].to_parquet(labels_path)
+   df[proc.feature_columns + [proc.label_column]].to_parquet(joined_path)
    ```
-   All three share the same index so features and labels are always aligned.
 
-6. **Summarize and report**:
+4. **Summarize and report**:
    - Paths written: features, labels, joined
    - Shape of each file
    - Label distribution (value counts + positive rate)
-   - Feature summary stats (mean, std, min, max per feature column)
    - NaN rows dropped (before vs after dropna)
    - When called by another skill, return all three paths: `features_path`, `labels_path`, `joined_path`
 
 ## Notes
 
 - `data/ml/` is gitignored — cache files are local only.
-- Keep features and labels on the same DataFrame so row alignment is preserved.
-- For multi-symbol inputs, run the pipeline per symbol and concatenate with a symbol index level.
-- The label transformers in `utils/label_transformer.py` currently have a string formatting bug in column names (f-string braces missing). Work around it by computing label logic inline if the transformer output looks wrong.
-</thinking>
+- The processor extends the fetch range automatically: ±1 day for minute bars (covers rolling warmup and lookforward tail), −365 days for daily bars (covers MA-200 warmup). The output is filtered back to the requested `start`/`end`.
+- Daily features are joined on the *previous* trading day to avoid same-day data leakage.
+- Output columns: minute features end in `_minute`, daily features in `_daily`. Use `proc.feature_columns` to get the full list rather than inferring from column names.
+- For label column name, use `proc.label_column` rather than hardcoding `'label'`.

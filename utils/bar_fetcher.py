@@ -22,22 +22,64 @@ _CACHE_DIR = os.path.join(_PROJECT_ROOT, 'data', 'bars')
 
 class BaseBarFetcher(ABC):
     """
-    This class is responsible for fetching bars from different data sources.
+    Base class for fetching OHLCV bars from different data sources.
+
+    Subclasses must define _SOURCE and implement _fetch_raw(). Caching
+    and cache-path construction are handled here so child classes stay
+    focused on source-specific fetch logic.
     """
+
+    _SOURCE: str  # e.g. 'alpaca', 'yahoo'
+
     def __init__(self):
         pass
 
+    def _cache_path(self, symbol, start_datestr: str, end_datestr: str,
+                    timeframe: str, only_market_hours: bool) -> str:
+        sym_key = (symbol.replace('/', '-') if isinstance(symbol, str)
+                   else '_'.join(s.replace('/', '-') for s in sorted(symbol)))
+        mh = 'mh' if only_market_hours else 'full'
+        filename = f"{self._SOURCE}_{start_datestr}_{end_datestr}_{timeframe}_{mh}.parquet"
+        return os.path.join(_CACHE_DIR, sym_key, filename)
+
+    def fetch_bars(self, symbol, start_datestr: str, end_datestr: str,
+                   timeframe: str = 'day', only_market_hours: bool = True) -> pd.DataFrame:
+        """
+        Fetch bars with transparent disk caching under data/bars/.
+
+        Cache path: data/bars/<symbol>/<source>_<start>_<end>_<timeframe>_<mh|full>.parquet
+
+        Args:
+            symbol: ticker string or list of ticker strings
+            start_datestr: start date as 'YYYY-MM-DD'
+            end_datestr: end date as 'YYYY-MM-DD' (inclusive)
+            timeframe: 'minute' | 'hour' | 'day' | 'week' | 'month'
+            only_market_hours: filter to exchange hours only
+
+        Returns:
+            DataFrame indexed by (symbol, timestamp) with columns
+            open, high, low, close, volume, trade_count, vwap
+        """
+        cache = self._cache_path(symbol, start_datestr, end_datestr, timeframe, only_market_hours)
+        if os.path.exists(cache):
+            return pd.read_parquet(cache)
+
+        df = self._fetch_raw(symbol, start_datestr, end_datestr, timeframe, only_market_hours)
+
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        df.to_parquet(cache)
+        return df
+
     @abstractmethod
-    def fetch_bars(self) -> pd.DataFrame:
-        """
-        Fetch bars from the data source.
-        """
+    def _fetch_raw(self, symbol, start_datestr: str, end_datestr: str,
+                   timeframe: str, only_market_hours: bool) -> pd.DataFrame:
+        """Fetch bars from the source without caching."""
         pass
 
 
-class AlpacaBarFetcher:
+class AlpacaBarFetcher(BaseBarFetcher):
     """
-    This class is responsible for fetching bars from different data sources.
+    Fetches OHLCV bars from Alpaca. Supports equities and crypto.
     """
 
     _SOURCE = 'alpaca'
@@ -51,13 +93,13 @@ class AlpacaBarFetcher:
 
     def __init__(self):
         super().__init__()
-        api_key = os.environ.get('ALPACA_API_KEY')
+        api_key    = os.environ.get('ALPACA_API_KEY')
         secret_key = os.environ.get('ALPACA_SECRET_KEY')
+        if not api_key or not secret_key:
+            raise ValueError("ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in the environment")
 
-        assert api_key is not None and secret_key is not None, "API key and secret key are required"
-
-        self._stock_client  = StockHistoricalDataClient(api_key, secret_key)
-        self._crypto_client = CryptoHistoricalDataClient(api_key, secret_key)
+        self._stock_client   = StockHistoricalDataClient(api_key, secret_key)
+        self._crypto_client  = CryptoHistoricalDataClient(api_key, secret_key)
         self._trading_client = TradingClient(api_key, secret_key)
         self._asset_class_cache: dict[str, AssetClass] = {}
 
@@ -103,40 +145,14 @@ class AlpacaBarFetcher:
 
         return pd.DataFrame(rows, columns=['date', 'open', 'close'])
 
-
-    def _cache_path(self, symbol, start_datestr: str, end_datestr: str, timeframe: str, only_market_hours: bool) -> str:
-        sym_key = symbol.replace('/', '-') if isinstance(symbol, str) else '_'.join(s.replace('/', '-') for s in sorted(symbol))
-        mh = 'mh' if only_market_hours else 'full'
-        filename = f"{self._SOURCE}_{start_datestr}_{end_datestr}_{timeframe}_{mh}.parquet"
-        return os.path.join(_CACHE_DIR, sym_key, filename)
-
-    def fetch_bars(self, symbol, start_datestr, end_datestr, timeframe='minute', only_market_hours=True) -> pd.DataFrame:
-        """
-        Fetch bars from Alpaca, with transparent disk caching under data/bars/.
-
-        Cache path: data/bars/<symbol>/<start>_<end>_<timeframe>_<mh|full>.parquet
-
-        Args:
-            symbol: ticker string or list of ticker strings
-            start_datestr: start date as 'YYYY-MM-DD'
-            end_datestr: end date as 'YYYY-MM-DD' (inclusive)
-            timeframe: 'minute' | 'hour' | 'day' | 'week' | 'month'
-            only_market_hours: filter to exchange hours (equities) or full day (crypto)
-
-        Returns:
-            DataFrame indexed by (symbol, timestamp) with columns
-            open, high, low, close, volume, trade_count, vwap
-        """
-        cache = self._cache_path(symbol, start_datestr, end_datestr, timeframe, only_market_hours)
-        if os.path.exists(cache):
-            return pd.read_parquet(cache)
-
+    def _fetch_raw(self, symbol, start_datestr: str, end_datestr: str,
+                   timeframe: str, only_market_hours: bool) -> pd.DataFrame:
         tf = self._TIMEFRAME_MAP.get(timeframe)
         if tf is None:
             raise ValueError(f"Unsupported timeframe '{timeframe}'. Choose from: {list(self._TIMEFRAME_MAP)}")
 
         start = datetime.strptime(start_datestr, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-        end = datetime.strptime(end_datestr, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        end   = datetime.strptime(end_datestr,   '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
 
         if self._get_asset_class(symbol) == AssetClass.CRYPTO:
             request = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=tf, start=start, end=end)
@@ -155,14 +171,12 @@ class AlpacaBarFetcher:
                 mask |= (timestamps >= row['open']) & (timestamps <= row['close'])
             df = df[mask]
 
-        os.makedirs(os.path.dirname(cache), exist_ok=True)
-        df.to_parquet(cache)
         return df
 
 
 class YahooBarFetcher(BaseBarFetcher):
     """
-    This class is responsible for fetching bars from Yahoo Finance.
+    Fetches OHLCV bars from Yahoo Finance.
     """
 
     _SOURCE = 'yahoo'
@@ -177,34 +191,8 @@ class YahooBarFetcher(BaseBarFetcher):
     def __init__(self):
         super().__init__()
 
-    def _cache_path(self, symbol, start_datestr: str, end_datestr: str, timeframe: str, only_market_hours: bool) -> str:
-        sym_key = symbol.replace('/', '-') if isinstance(symbol, str) else '_'.join(s.replace('/', '-') for s in sorted(symbol))
-        mh = 'mh' if only_market_hours else 'full'
-        filename = f"{self._SOURCE}_{start_datestr}_{end_datestr}_{timeframe}_{mh}.parquet"
-        return os.path.join(_CACHE_DIR, sym_key, filename)
-
-    def fetch_bars(self, symbol, start_datestr, end_datestr, timeframe='day', only_market_hours=True) -> pd.DataFrame:
-        """
-        Fetch bars from Yahoo Finance, with transparent disk caching under data/bars/.
-
-        Cache path: data/bars/<symbol>/yahoo_<start>_<end>_<timeframe>_<mh|full>.parquet
-
-        Args:
-            symbol: ticker string or list of ticker strings
-            start_datestr: start date as 'YYYY-MM-DD'
-            end_datestr: end date as 'YYYY-MM-DD' (inclusive)
-            timeframe: 'minute' | 'hour' | 'day' | 'week' | 'month'
-            only_market_hours: accepted for API compatibility; yfinance naturally
-                               returns market-hours-only data for intraday bars
-
-        Returns:
-            DataFrame indexed by (symbol, timestamp) with columns
-            open, high, low, close, volume, trade_count, vwap
-        """
-        cache = self._cache_path(symbol, start_datestr, end_datestr, timeframe, only_market_hours)
-        if os.path.exists(cache):
-            return pd.read_parquet(cache)
-
+    def _fetch_raw(self, symbol, start_datestr: str, end_datestr: str,
+                   timeframe: str, only_market_hours: bool) -> pd.DataFrame:
         interval = self._INTERVAL_MAP.get(timeframe)
         if interval is None:
             raise ValueError(f"Unsupported timeframe '{timeframe}'. Choose from: {list(self._INTERVAL_MAP)}")
@@ -219,13 +207,10 @@ class YahooBarFetcher(BaseBarFetcher):
                 start=start_datestr, end=end_exclusive, interval=interval, auto_adjust=True
             )
             if raw.empty:
-                df = pd.DataFrame(
+                return pd.DataFrame(
                     columns=['open', 'high', 'low', 'close', 'volume', 'trade_count', 'vwap'],
                     index=pd.MultiIndex.from_tuples([], names=['symbol', 'timestamp']),
                 )
-                os.makedirs(os.path.dirname(cache), exist_ok=True)
-                df.to_parquet(cache)
-                return df
             raw = raw[['Open', 'High', 'Low', 'Close', 'Volume']]
             raw.columns = ['open', 'high', 'low', 'close', 'volume']
             raw.index = raw.index.tz_convert('UTC').rename('timestamp')
@@ -243,8 +228,6 @@ class YahooBarFetcher(BaseBarFetcher):
             df = df.set_index(['symbol', 'timestamp']).sort_index()
 
         df['trade_count'] = float('nan')
-        df['vwap'] = float('nan')
+        df['vwap']        = float('nan')
 
-        os.makedirs(os.path.dirname(cache), exist_ok=True)
-        df.to_parquet(cache)
         return df
