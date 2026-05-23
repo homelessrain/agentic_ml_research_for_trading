@@ -71,7 +71,7 @@ class MinuteAndDailyMLDataProcessor(MLDataProcessor):
               .rename(columns={'timestamp': 'datetime'})
         )
 
-    def run(self, start_datestr: str, end_datestr: str) -> pd.DataFrame:
+    def run(self, start_datestr: str, end_datestr: str, drop_label_na: bool = True) -> pd.DataFrame:
         """
         Process minute and daily bar data into ML-ready features and labels.
         """
@@ -134,6 +134,8 @@ class MinuteAndDailyMLDataProcessor(MLDataProcessor):
             (merged_df['datestr'] <= end_datestr)
         ]
 
+        if drop_label_na and self._minute_label_transformer is not None:
+            filtered_df = filtered_df.dropna(subset=[self.label_column])
         return filtered_df
 
 
@@ -174,7 +176,7 @@ class MultipleSymbolMinuteAndDailyMLDataProcessor(MLDataProcessor):
                 result.extend(f'{col}_{symbol}' for col in processor.feature_columns)
         return result
 
-    def run(self, start_datestr: str, end_datestr: str) -> pd.DataFrame:
+    def run(self, start_datestr: str, end_datestr: str, drop_label_na: bool = True) -> pd.DataFrame:
         """
         Run the ML data processor for multiple symbols and join the results on datetime.
 
@@ -182,7 +184,7 @@ class MultipleSymbolMinuteAndDailyMLDataProcessor(MLDataProcessor):
         """
         merged_df = None
         for symbol, processor in zip(self._symbols, self._list_of_ml_data_processors):
-            symbol_df = processor.run(start_datestr, end_datestr)
+            symbol_df = processor.run(start_datestr, end_datestr, drop_label_na=drop_label_na)
             print(f"Symbol: {symbol}, Shape: {symbol_df.shape}")
             if merged_df is None:
                 merged_df = symbol_df

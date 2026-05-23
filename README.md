@@ -17,6 +17,11 @@ This is NOT a backtesting framework, or a technical indicator / trading signal l
 
 ## The How
 
+### Design Philosophy
+
+Following the idea of harness engineering, we build the necessary environments and components to faciliate agentic workflows. For example, we build the util functions for data/label transformation, model class examples, and reference scripts for training/evaluation, all of which can be readily used by agents instead of that they need to come up with end-to-end logic on the fly. It has two benefits: 1. add certain control over the agentic workflows; 2. save token usage.
+
+
 ### Repo Structure
 * `models`: ML model implementations. It will have a sub-folder called `agent`, which contains the model files added by agent
 * `scripts`: any reusable scripts for training, evaluation, and data visualization
