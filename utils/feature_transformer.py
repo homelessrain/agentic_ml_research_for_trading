@@ -61,19 +61,23 @@ class OLHCVFeatureTransformer(FeatureTransformer):
         # ========================================================
         # Raw bar features
         # ========================================================
-        num_recent_bars = 10
-        for i in range(num_recent_bars):
-            for col in value_columns:
-                df[self._register(f'{col}_lag_{i}')] = df[col].shift(i)
+        # Commented out: ablation showed raw lags hurt generalization (−0.036 AUC)
+        # and cause near-perfect train AUC (overfitting signal).
+        # num_recent_bars = 10
+        # for i in range(num_recent_bars):
+        #     for col in value_columns:
+        #         df[self._register(f'{col}_lag_{i}')] = df[col].shift(i)
 
         # ========================================================
         # Normalized bar features
         # ========================================================
-        for col in value_columns:
-            diff_col = f'{col}_diff'
-            df[diff_col] = df[col].diff()
-            df[self._register(f'{diff_col}_ratio')]     = 1 + (df[diff_col] / df[f'{col}_lag_1'])
-            df[self._register(f'{diff_col}_ratio_log')] = np.log(df[f'{diff_col}_ratio'])
+        # Commented out: diff-ratios are nearly neutral (−0.008 AUC) and
+        # largely redundant with MA ratios.
+        # for col in value_columns:
+        #     diff_col = f'{col}_diff'
+        #     df[diff_col] = df[col].diff()
+        #     df[self._register(f'{diff_col}_ratio')]     = 1 + (df[diff_col] / df[f'{col}_lag_1'])
+        #     df[self._register(f'{diff_col}_ratio_log')] = np.log(df[f'{diff_col}_ratio'])
 
         moving_average_windows = [5, 10, 20, 50, 100, 200]
         for col in value_columns:
@@ -86,15 +90,16 @@ class OLHCVFeatureTransformer(FeatureTransformer):
         # ========================================================
         # Technical indicator features
         # ========================================================
-        for length in [14, 20, 30, 50, 100, 200]:
-            df[self._register(f'close_rsi_{length}')] = df.ta.rsi(close='close', length=length)
+        # Commented out: ablation showed RSI/MACD are redundant with MA ratios
+        # (+0.004 AUC improvement when removed).
+        # for length in [14, 20, 30, 50, 100, 200]:
+        #     df[self._register(f'close_rsi_{length}')] = df.ta.rsi(close='close', length=length)
+        #
+        # macd = df.ta.macd(close='close', length=12, slow=26, signal=9)
+        # df[self._register('close_macd')]        = macd.iloc[:, 0]
+        # df[self._register('close_macd_hist')]   = macd.iloc[:, 1]
+        # df[self._register('close_macd_signal')] = macd.iloc[:, 2]
 
-        macd = df.ta.macd(close='close', length=12, slow=26, signal=9)
-        df[self._register('close_macd')]        = macd.iloc[:, 0]
-        df[self._register('close_macd_hist')]   = macd.iloc[:, 1]
-        df[self._register('close_macd_signal')] = macd.iloc[:, 2]
-
-        # ========================================================
         # ========================================================
         # Time-based features
         # ========================================================
