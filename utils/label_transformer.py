@@ -34,10 +34,10 @@ class DirectionLabelTransformer(LabelTransformer):
         self,
         price_column: str = 'close',
         label_column: str = 'label',
-        positive_label: str = 'up',
-        up_delta: float = 0.01,
-        down_delta: float = 0.01,
-        lookforward_period: int = 120,
+        positive_label: str = 'down',
+        up_delta: float = 0.0075,
+        down_delta: float = 0.015,
+        lookforward_period: int = 60,
     ):
         super().__init__()
         self._price_column = price_column

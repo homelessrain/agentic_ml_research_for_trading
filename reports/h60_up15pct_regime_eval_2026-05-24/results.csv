@@ -1,0 +1,8 @@
+period,regime,train_pos_pct,test_pos_pct,n_pos,n_total,reliable,roc_auc,pr_auc,log_loss,calibration_correlation
+2025-03,Strong correction (-8.4%),0.72,1.90,156,8211,True,0.8095,0.0841,0.1742,0.875
+2025-04,Crisis crash+recovery,0.77,8.26,678,8211,True,0.7190,0.1793,1.0763,0.640
+2025-11,Mild correction (-2.8%),1.07,2.08,151,7249,True,0.8688,0.0762,0.1775,0.130
+2026-01,Flat / normal (-0.2%),1.07,0.36,28,7760,False,0.7943,0.0085,0.0427,-0.092
+2026-02,Mild correction (-2.3%),1.09,0.15,11,7369,False,0.9886,0.0629,0.0315,0.992
+2026-03,Correction (-3.8%),1.10,1.96,169,8602,True,0.8552,0.0910,0.1323,0.650
+2026-04,Recovery (+14.9%),1.14,1.00,82,8211,True,0.8977,0.0444,0.0974,0.050
