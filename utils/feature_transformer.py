@@ -95,9 +95,10 @@ class OLHCVFeatureTransformer(FeatureTransformer):
         df[self._register('close_macd_signal')] = macd.iloc[:, 2]
 
         # ========================================================
+        # ========================================================
         # Time-based features
         # ========================================================
-        df['hour_of_day'] = df['datetime'].dt.hour.astype('category')
-        df['day_of_week'] = df['datetime'].dt.dayofweek.astype('category')
+        df[self._register('hour_of_day')] = df['datetime'].dt.hour.astype('category')
+        df[self._register('day_of_week')] = df['datetime'].dt.dayofweek.astype('category')
 
         return df

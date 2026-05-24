@@ -7,3 +7,5 @@ TODOs.md
 .env
 reports/local/
 recaps/*
+models/agent/
+scripts/agent/
