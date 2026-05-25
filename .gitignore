@@ -6,6 +6,6 @@ pyrightconfig.json
 TODOs.md
 .env
 reports/local/
-recaps/*
+recaps/local/*
 models/agent/
 scripts/agent/

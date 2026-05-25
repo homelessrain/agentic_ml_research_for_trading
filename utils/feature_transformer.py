@@ -107,3 +107,40 @@ class OLHCVFeatureTransformer(FeatureTransformer):
         df[self._register('day_of_week')] = df['datetime'].dt.dayofweek.astype('category')
 
         return df
+
+
+class DailyOLHCVFeatureTransformer(FeatureTransformer):
+    """
+    MA-ratio features derived from daily OHLCV bars — no time features.
+
+    This is the correct transformer for the daily timeframe in
+    MinuteAndDailyMLDataProcessor. OLHCVFeatureTransformer is NOT
+    appropriate for daily bars because:
+      - hour_of_day on daily bars is a DST artifact (only values: 4 or 5 UTC),
+        carrying zero signal.
+      - day_of_week on daily bars represents the *previous* trading day's weekday
+        (features are joined to the next day), which is redundant with the minute
+        bar's day_of_week.
+
+    Produces 60 features per timeframe (vs 62 from OLHCVFeatureTransformer),
+    keeping only the cross-timeframe trend signal: MA ratios at multiple windows.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        required_columns = ['datetime', 'open', 'high', 'low', 'close', 'volume']
+        self._validate_columns(df, required_columns)
+        self._feature_columns = []
+
+        value_columns = [c for c in required_columns if c != 'datetime']
+
+        moving_average_windows = [5, 10, 20, 50, 100, 200]
+        for col in value_columns:
+            for maw in moving_average_windows:
+                ma_col = f'{col}_ma_{maw}'
+                df[ma_col] = df[col].rolling(window=maw).mean()
+                df[self._register(f'{col}_by_{ma_col}_ratio')]     = 1 + (df[col] / df[ma_col])
+                df[self._register(f'{col}_by_{ma_col}_ratio_log')] = np.log(df[f'{col}_by_{ma_col}_ratio'])
+
+        return df

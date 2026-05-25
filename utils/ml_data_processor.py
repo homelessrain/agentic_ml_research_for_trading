@@ -104,6 +104,18 @@ class MinuteAndDailyMLDataProcessor(MLDataProcessor):
         # Features (daily-level)
         daily_feature_df = self._daily_feature_transformer.transform(daily_df.copy())
 
+        # Pre-rename feature columns with their intended suffixes BEFORE merging.
+        # Pandas merge only adds suffixes to columns that collide between both sides.
+        # When minute and daily transformers differ (e.g. DailyOLHCVFeatureTransformer
+        # omits time features), columns unique to one side would be left un-suffixed,
+        # causing a mismatch with the '_minute'/'_daily' names returned by feature_columns.
+        minute_feature_df = minute_feature_df.rename(
+            columns={c: f'{c}_minute' for c in self._minute_feature_transformer.feature_columns}
+        )
+        daily_feature_df = daily_feature_df.rename(
+            columns={c: f'{c}_daily' for c in self._daily_feature_transformer.feature_columns}
+        )
+
         # Join daily features onto the *next* trading day so we never leak
         # same-day daily information into minute-level rows.
         daily_feature_df['date']              = daily_feature_df['datetime'].dt.date
@@ -116,7 +128,7 @@ class MinuteAndDailyMLDataProcessor(MLDataProcessor):
             minute_feature_df, daily_feature_df,
             left_on='date', right_on='next_trading_date',
             how='left',
-            suffixes=('_minute', '_daily'),
+            suffixes=('_minute', '_daily'),  # fallback suffix for any remaining collisions (e.g. raw OHLCV cols)
         )
         # Restore 'datetime' as a plain column for downstream merges and filtering.
         merged_feature_df = merged_feature_df.rename(columns={'datetime_minute': 'datetime'})
