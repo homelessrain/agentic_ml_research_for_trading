@@ -9,4 +9,6 @@ Review past research reports (specially most recent ones), reason about the impl
 
 ## Output
 
-Create a new folder under `recaps/local` directory for each recap.
+Generate 2 output:
+* Create a new folder under `recaps/local` directory for each recap. The folder should be the recap datestr. This recap output file should focus on summarizing recent research and insights and suggesting next steps.
+* Create (or update) a file called `memory.md` under `recaps/local`. This file is different than the first recap file in that it should have a more comprehensive coverage of all historical research results, which will be used for next session's agents to pick up the historical context.
